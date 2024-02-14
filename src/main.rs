@@ -68,16 +68,17 @@ fn update(data: Vec<u8>) -> Result<(), String> {
             shim_data_path
         );
         let shims_path = Path::new(localappdata).join("Discord");
-        let app_dir = shims_path
+        let mut app_dir: Vec<String> = shims_path
             .read_dir()
             .map_err(|err| format!("Failed to read Discord dirs! {}", err))?
             .filter_map(Result::ok)
             .filter(|entry| entry.path().is_dir())
             .filter_map(|entry| entry.file_name().into_string().ok())
-            .find(|name| name.starts_with("app"))
-            .ok_or("Failed to find app dir!")?;
+            .filter(|name| name.starts_with("app"))
+            .collect();
+        app_dir.sort();
         let shims_path = shims_path
-            .join(app_dir)
+            .join(app_dir.last().unwrap())
             .join("modules")
             .join("discord_desktop_core-1")
             .join("discord_desktop_core")
@@ -102,15 +103,16 @@ fn start_discord() -> Result<(), String> {
     let localappdata = std::env::var("LOCALAPPDATA")
         .map_err(|err| format!("Couldn't get %LOCALAPPDATA% {}", err))?;
     let discord = Path::new(&localappdata).join("Discord");
-    let app_dir = discord
+    let mut app_dir: Vec<String> = discord
         .read_dir()
         .map_err(|err| format!("Failed to read Discord dirs! {}", err))?
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .find(|name| name.starts_with("app"))
-        .ok_or("Failed to find app dir!")?;
-    let discord = discord.join(app_dir).join("Discord.exe");
+        .filter(|name| name.starts_with("app"))
+        .collect();
+    app_dir.sort();
+    let discord = discord.join(app_dir.last().unwrap()).join("Discord.exe");
     std::process::Command::new(discord).spawn().map_err(|err| format!("Error starting Discord! {}", err))?;
     Ok(())
 }
