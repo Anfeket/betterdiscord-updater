@@ -1,22 +1,24 @@
 use std::{
-    io::Write,
-    path::{Path, PathBuf},
-    process::{exit, Stdio},
+    io::Write, path::{Path, PathBuf}, process::exit
 };
 
 fn main() {
     kill_discord().unwrap();
     println!("Discord killed!");
-    let data = get_asar().unwrap();
-    println!("Downloaded {}kb", data.len() / 1024);
-    update(data).unwrap();
-    println!("Discord updated!");
+    let data = get_betterdiscord_asar().unwrap();
+    println!("Downloaded betterdiscord.asar: {}kb", data.len() / 1024);
+    update_betterdiscord(data).unwrap();
+    println!("Betterdiscord updated!");
+    let data = get_openasar().unwrap();
+    println!("Downloaded openasar: {}kb", data.len() / 1024);
+    update_openasar(data).unwrap();
+    println!("Updated openasar!");
     start_discord().unwrap();
     println!("Discord started!");
     exit(0);
 }
 
-fn get_asar() -> Result<Vec<u8>, String> {
+fn get_betterdiscord_asar() -> Result<Vec<u8>, String> {
     use reqwest::{blocking::Client, header};
     let app = "anfeket/betterdiscord-updater";
     let url = "https://betterdiscord.app/Download/betterdiscord.asar";
@@ -40,7 +42,44 @@ fn get_asar() -> Result<Vec<u8>, String> {
         .map(|data| data.to_vec())
 }
 
-fn update(data: Vec<u8>) -> Result<(), String> {
+fn get_openasar() -> Result<Vec<u8>, String> {
+    use reqwest::{blocking::Client, header};
+    let app = "anfeket/betterdiscord-updater";
+    let url = "https://github.com/GooseMod/OpenAsar/releases/download/nightly/app.asar";
+    let data = Client::new()
+        .get(url)
+        .header(header::USER_AGENT, app)
+        .send()
+        .map_err(|err| format!("Error sending request! {}", err))?;
+    println!("Downloading latest openasar release...");
+    data.bytes()
+        .map_err(|err| format!("Couldn't convert to bytes! {}", err))
+        .map(|data| data.to_vec())
+}
+
+fn write_data_to_path(path: &PathBuf, data: &Vec<u8>) -> Result<(), String> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|err| format!("Error opening {:?}! {}", path, err))?
+        .write_all(&data)
+        .map_err(|err| format!("Error writing to {:?}! {}", path, err))
+}
+
+fn find_latest_app_version(discord_path: &Path) -> Result<PathBuf, String> {
+    let mut app_dir: Vec<std::fs::DirEntry> = discord_path
+        .read_dir()
+        .map_err(|err| format!("Failed to read Discord dirs! {}", err))?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter(|entry| entry.file_name().to_str().unwrap().starts_with("app"))
+        .collect();
+    app_dir.sort_by_key(|entry| entry.file_name());
+    let latest = app_dir.last().unwrap().path();
+    Ok(latest)
+}
+
+fn update_betterdiscord(data: Vec<u8>) -> Result<(), String> {
     let localappdata = std::env::var("LOCALAPPDATA")
         .map_err(|err| format!("Couldn't get %LOCALAPPDATA% {}", err))?;
     let appdata =
@@ -50,15 +89,7 @@ fn update(data: Vec<u8>) -> Result<(), String> {
         .join("BetterDiscord")
         .join("data")
         .join("betterdiscord.asar");
-    fn write_data(path: &PathBuf, data: &Vec<u8>) -> Result<(), String> {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|err| format!("Error opening {:?}! {}", path, err))?
-            .write_all(&data)
-            .map_err(|err| format!("Error writing to {:?}! {}", path, err))
-    }
-    write_data(&asar_path, &data)?;
+    write_data_to_path(&asar_path, &data)?;
 
     fn shims(asar_path: &Path, localappdata: &String) -> Result<(), String> {
         let shim_data_path = asar_path
@@ -69,27 +100,32 @@ fn update(data: Vec<u8>) -> Result<(), String> {
             "require(\"{}\");\nmodule.exports = require(\"./core.asar\");",
             shim_data_path
         );
-        let shims_path = Path::new(localappdata).join("Discord");
-        let mut app_dir: Vec<String> = shims_path
-            .read_dir()
-            .map_err(|err| format!("Failed to read Discord dirs! {}", err))?
-            .filter_map(Result::ok)
-            .filter(|entry| entry.path().is_dir())
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| name.starts_with("app"))
-            .collect();
-        app_dir.sort();
-        let shims_path = shims_path
-            .join(app_dir.last().unwrap())
+        let appdata_path = Path::new(localappdata).join("Discord");
+        let appdir = find_latest_app_version(&appdata_path);
+        let shims_path = appdata_path
+            .join(appdir.unwrap())
             .join("modules")
             .join("discord_desktop_core-1")
             .join("discord_desktop_core")
             .join("index.js");
-        write_data(&shims_path, &shim_data.as_bytes().to_owned())?;
+        write_data_to_path(&shims_path, &shim_data.as_bytes().to_owned())?;
         Ok(())
     }
     shims(&asar_path, &localappdata)?;
     Ok(())
+}
+
+fn update_openasar(data: Vec<u8>) -> Result<(), String> {
+    let localappdata = std::env::var("LOCALAPPDATA")
+        .map_err(|err| format!("Couldn't get %LOCALAPPDATA% {}", err))?;
+    let appdata_path = Path::new(&localappdata).join("Discord");
+    let discord_path = find_latest_app_version(&appdata_path)?;
+    let asar_path = discord_path.join("resources").join("app.asar");
+    let backup = discord_path.join("resources").join("app.asar.orig");
+    if std::fs::copy(&asar_path, backup).is_err() {
+        println!("Failed to backup, continuing...")
+    };
+    write_data_to_path(&asar_path, &data)
 }
 
 fn kill_discord() -> Result<(), String> {
