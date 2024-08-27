@@ -1,6 +1,7 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
+    process::{exit, Stdio},
 };
 
 fn main() {
@@ -12,6 +13,7 @@ fn main() {
     println!("Discord updated!");
     start_discord().unwrap();
     println!("Discord started!");
+    exit(0);
 }
 
 fn get_asar() -> Result<Vec<u8>, String> {
@@ -102,17 +104,13 @@ fn kill_discord() -> Result<(), String> {
 fn start_discord() -> Result<(), String> {
     let localappdata = std::env::var("LOCALAPPDATA")
         .map_err(|err| format!("Couldn't get %LOCALAPPDATA% {}", err))?;
-    let discord = Path::new(&localappdata).join("Discord");
-    let mut app_dir: Vec<String> = discord
-        .read_dir()
-        .map_err(|err| format!("Failed to read Discord dirs! {}", err))?
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| name.starts_with("app"))
-        .collect();
-    app_dir.sort();
-    let discord = discord.join(app_dir.last().unwrap()).join("Discord.exe");
-    std::process::Command::new(discord).spawn().map_err(|err| format!("Error starting Discord! {}", err))?;
+    let discord = Path::new(&localappdata).join("Discord").join("Update.exe");
+    std::process::Command::new(discord)
+        .args(["--processStart", "Discord.exe"])
+        // .stdin(Stdio::null())
+        // .stdout(Stdio::null())
+        // .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| format!("Error starting Discord! {}", err))?;
     Ok(())
 }
